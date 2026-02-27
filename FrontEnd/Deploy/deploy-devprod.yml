@@ -1,0 +1,75 @@
+name: Desplegament Vue.js a EC2 (Dev i Prod)
+
+# Aquest workflow s'executarà automàticament quan fem 'push' a aquestes branques
+on:
+  push:
+    branches:
+      - main     # Branca de producció
+      - develop  # Branca de desenvolupament
+
+jobs:
+  # =========================================================
+  # JOB 1: DESPLEGAMENT A DESENVOLUPAMENT (Dev)
+  # =========================================================
+  deploy-dev:
+    # Aquest Job NOMÉS s'executa si la branca és 'develop'
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Descarregar el codi del repositori
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar l'entorn de Node.js (necessari per compilar Vue)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Instal·lar dependències del projecte (npm ci és més segur per CI/CD)
+        run: npm ci
+
+      - name: 🏗️ Compilar l'aplicació Vue.js per a Dev (Genera la carpeta /dist)
+        run: npm run build
+
+      - name: 🚀 Enviar els fitxers compilats al servidor de DESENVOLUPAMENT
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}       # IP del servidor Dev
+          username: ${{ secrets.DEV_SERVER_USER }}   # Ex: ubuntu
+          key: ${{ secrets.DEV_SERVER_SSH_KEY }}     # Clau .pem de Dev
+          source: "dist/*"
+          target: "/var/www/frontend/dev/dist"
+          strip_components: 1 # Elimina la carpeta 'dist/' de la ruta destino
+
+  # =========================================================
+  # JOB 2: DESPLEGAMENT A PRODUCCIÓ (Prod)
+  # =========================================================
+  deploy-prod:
+    # Aquest Job NOMÉS s'executa si la branca és 'main'
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Descarregar el codi del repositori
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar l'entorn de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 📦 Instal·lar dependències del projecte
+        run: npm ci
+
+      - name: 🏗️ Compilar l'aplicació Vue.js per a Prod
+        run: npm run build
+
+      - name: 🚀 Enviar els fitxers compilats al SERVIDOR DEDICAT DE PRODUCCIÓ
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.PROD_SERVER_HOST }}       # IP del servidor Frontend Prod
+          username: ${{ secrets.PROD_SERVER_USER }}   # Ex: ubuntu
+          key: ${{ secrets.PROD_SERVER_SSH_KEY }}     # Clau .pem de Prod
+          source: "dist/*"
+          target: "/var/www/frontend/prod/dist"
+          strip_components: 1

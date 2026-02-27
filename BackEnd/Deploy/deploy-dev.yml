@@ -1,0 +1,58 @@
+name: Deploy Backend a DEV (EC2 Bare Metal)
+
+on:
+  push:
+    branches: [ develop ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixant el codi del repositori
+        uses: actions/checkout@v4 
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+
+      # PEDAGÒGIC: En comptes d'usar una action opaca, configurem l'SSH manualment
+      # Així els alumnes aprenen que necessitem una clau privada (id_rsa) i confiar en el host (known_hosts)
+      - name: Configurar SSH manualment
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.EC2_SSH_KEY_DEV }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ vars.EC2_HOST_DEV }} >> ~/.ssh/known_hosts
+
+      # PEDAGÒGIC: Rysnc envia només els fitxers que han canviat.
+      # Excloem '.env.local' perquè no s'esborri del servidor el que hem pujat a mà.
+      - name: Sincronitzant fitxers amb RSYNC
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'var/' \
+            --exclude 'vendor/' \
+            --exclude '.env.local' \
+            ./ ${{ vars.EC2_USER }}@${{ vars.EC2_HOST_DEV }}:/var/www/backend/
+
+      - name: Executar comandes Post-Desplegament via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.EC2_HOST_DEV }}
+          username: ${{ vars.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY_DEV }}
+          script: |
+            cd /var/www/backend
+
+            # 1. Instal·lar dependències a la màquina destí
+            export COMPOSER_ALLOW_SUPERUSER=1
+            composer install --optimize-autoloader
+
+            # 2. Netejar caché (Estem a l'entorn DEV)
+            php bin/console cache:clear --env=dev
+
+            # 3. Executar migracions de BD automàticament
+            php bin/console doctrine:migrations:migrate --no-interaction

@@ -1,0 +1,46 @@
+name: Deploy Vue Frontend to EC2
+
+on:
+  push:
+    branches:
+      - main     # Branca per a Producció
+      - develop  # Branca per a Desenvolupament
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout del codi
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Utilitza la versió que treballeu a classe
+
+      - name: 📦 Instal·lar dependències
+        run: npm ci # 'ci' és més segur i ràpid que 'install' per a entorns CI/CD
+
+      - name: 🏗️ Compilar l'aplicació (Build)
+        run: npm run build
+        # Nota: Si feu servir Vite, això generarà la carpeta 'dist/'
+
+      - name: 🔀 Determinar el directori de destí segons la branca
+        id: set-target
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "TARGET_DIR=/var/www/frontend/prod/dist" >> $GITHUB_ENV
+          else
+            echo "TARGET_DIR=/var/www/frontend/dev/dist" >> $GITHUB_ENV
+          fi
+
+      - name: 🚀 Desplegar al servidor EC2 via SCP
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "dist/*"
+          target: ${{ env.TARGET_DIR }}
+          strip_components: 1 # Elimina la carpeta arrel 'dist' perquè els fitxers quedin directament a target
