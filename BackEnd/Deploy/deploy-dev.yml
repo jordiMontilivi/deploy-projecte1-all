@@ -1,8 +1,10 @@
 name: Deploy Backend a DEV (EC2 Bare Metal)
 
 on:
+  pull_request:
+    branches: [develop]
   push:
-    branches: [ develop ]
+    branches: [develop]
   workflow_dispatch:
 
 jobs:
@@ -10,21 +12,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Baixant el codi del repositori
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
 
-      # PEDAGÒGIC: En comptes d'usar una action opaca, configurem l'SSH manualment
-      # Així els alumnes aprenen que necessitem una clau privada (id_rsa) i confiar en el host (known_hosts)
+      # PEDAGÒGIC: En comptes d'usar una action opaca, configurem l'SSH manualment la idea es vore com fer una rsync manualment
+      # Aci necessitem una clau privada (id_rsa (nom de la vostra clau))) i confiar en el host (known_hosts(necessari per a evitar errors de SSH))
       - name: Configurar SSH manualment
         run: |
           mkdir -p ~/.ssh/
+          # Guardem la clau privada d'AWS al runner temporal
           echo "${{ secrets.EC2_SSH_KEY_DEV }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+          # Afegim la IP al fitxer known_hosts per evitar que el terminal ens demani confirmació (yes/no)
           ssh-keyscan -H ${{ vars.EC2_HOST_DEV }} >> ~/.ssh/known_hosts
+
+      # MILLORA: Pugem l'script i l'executem.
+      # Hem afegit canvis a l'script per que comprove si la Instància ja té Apache configurat.
+      # Si no el té, l'instal·la i configura. Si ja el té, se salta aquest pas.
+      # L'script és "idempotent", ell mateix decidirà si ha d'instal·lar coses o no fer res.
+      - name: Provisionar servidor base
+        run: |
+          scp ./full-setup.sh ${{ vars.EC2_USER }}@${{ vars.EC2_HOST_DEV }}:/home/${{ vars.EC2_USER }}/full-setup.sh
+
+          # Executem l'script i, independentment de si falla o funciona, l'esborrem al final per no deixar merda al servidor.
+          ssh ${{ vars.EC2_USER }}@${{ vars.EC2_HOST }} "chmod +x full-setup.sh && sudo bash full-setup.sh dev all; rm -f full-setup.sh"
 
       # PEDAGÒGIC: Rysnc envia només els fitxers que han canviat.
       # Excloem '.env.local' perquè no s'esborri del servidor el que hem pujat a mà.
@@ -36,6 +51,7 @@ jobs:
             --exclude 'var/' \
             --exclude 'vendor/' \
             --exclude '.env.local' \
+            --exclude 'full-setup.sh' \
             ./ ${{ vars.EC2_USER }}@${{ vars.EC2_HOST_DEV }}:/var/www/backend/
 
       - name: Executar comandes Post-Desplegament via SSH
@@ -56,3 +72,11 @@ jobs:
 
             # 3. Executar migracions de BD automàticament
             php bin/console doctrine:migrations:migrate --no-interaction
+
+            # 4. REFORÇ DE PERMISOS (Vital): 
+            # Quan fem RSYNC de fitxers nous, a vegades perden l'ACL original. 
+            # Les tornem a aplicar a la carpeta var/ per assegurar que Apache i l'usuari no col·lisionin.
+            sudo setfacl -R -m u:www-data:rwX -m u:${{ vars.EC2_USER }}:rwX var/
+            sudo setfacl -dR -m u:www-data:rwX -m u:${{ vars.EC2_USER }}:rwX var/
+
+            echo " Desplegament de DEV finalitzat amb èxit!"

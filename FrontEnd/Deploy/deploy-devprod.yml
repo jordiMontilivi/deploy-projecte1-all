@@ -17,21 +17,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Descarregar el codi del repositori
+      - name: Descarregar el codi del repositori
         uses: actions/checkout@v4
 
-      - name: ⚙️ Configurar l'entorn de Node.js (necessari per compilar Vue)
+      - name: Configurar l'entorn de Node.js (necessari per compilar Vue)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 📦 Instal·lar dependències del projecte (npm ci és més segur per CI/CD)
+      - name: Instal·lar dependències del projecte (npm ci és més segur per CI/CD)
         run: npm ci
 
-      - name: 🏗️ Compilar l'aplicació Vue.js per a Dev (Genera la carpeta /dist)
+      - name: Compilar l'aplicació Vue.js per a Dev (Genera la carpeta /dist)
         run: npm run build
 
-      - name: 🚀 Enviar els fitxers compilats al servidor de DESENVOLUPAMENT
+      - name: Enviar els fitxers compilats al servidor de DESENVOLUPAMENT
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.DEV_SERVER_HOST }}       # IP del servidor Dev
@@ -50,21 +50,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Descarregar el codi del repositori
+      - name: Descarregar el codi del repositori
         uses: actions/checkout@v4
 
-      - name: ⚙️ Configurar l'entorn de Node.js
+      - name: Configurar l'entorn de Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 📦 Instal·lar dependències del projecte
+      - name: Instal·lar dependències del projecte
         run: npm ci
 
-      - name: 🏗️ Compilar l'aplicació Vue.js per a Prod
+      - name: Compilar l'aplicació Vue.js per a Prod
         run: npm run build
 
-      - name: 🚀 Enviar els fitxers compilats al SERVIDOR DEDICAT DE PRODUCCIÓ
+      - name: Enviar els fitxers compilats al SERVIDOR DEDICAT DE PRODUCCIÓ
         uses: appleboy/scp-action@v0.1.4
         with:
           host: ${{ secrets.PROD_SERVER_HOST }}       # IP del servidor Frontend Prod

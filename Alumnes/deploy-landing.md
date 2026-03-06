@@ -1,3 +1,5 @@
+Landing Page
+
 # !!! ⚠️⚠️⚠️⚠️ RECORDATORI: Les credencials s'han de configurar com a secrets al repositori (Settings > Secrets and variables > Actions) CADA VEGADA QUE OBRIM EL LAB D'ACADEMY, ja que caduquen ⚠️⚠️⚠️ !!!
 
 ### Guia de passos a tenir en compte per fer un desplegament de la landing page a un bucket S3 amb possibilitat de teniru un CloudFront
@@ -22,7 +24,7 @@ Perquè el desplegament funcioni correctament, has d'entendre què està passant
 
 ### Configuració necessària a GitHub (Settings > Secrets and variables > Actions)
 
-Abans de fer el primer `push`, assegura't de tenir creats els següents elements a la pestanya **Variables**:
+Abans de fer el primer `push`, assegura't de tenir creades i actualitzades les variables a la pestanya **Variables**:
 
 | Variable              | Descripció                                               |
 | --------------------- | -------------------------------------------------------- |
@@ -34,4 +36,4 @@ Abans de fer el primer `push`, assegura't de tenir creats els següents elements
 
 **Recordatori final:** Recorda que els **Secrets** d'AWS (`Access Key`, `Secret Key` i `Session Token`) caduquen. Si el deploy et dona un error de "Forbidden", el primer que has de fer és revisar si les credencials del laboratori han canviat!
 
-Vols que preparem una petita llista de comprovació (checklist) per als alumnes perquè sàpiguen on trobar aquestes dades a la consola d'AWS?
+ 

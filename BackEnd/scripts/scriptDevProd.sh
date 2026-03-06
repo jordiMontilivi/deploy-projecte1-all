@@ -6,12 +6,12 @@ ENTORN=${1:-dev}
 
 # Comprovem que l'alumne ha posat 'dev' o 'prod'
 if [ "$ENTORN" != "dev" ] && [ "$ENTORN" != "prod" ]; then
-    echo "❌ Error: L'entorn ha de ser 'dev' o 'prod'."
-    echo "👉 Ús correcte: sudo bash setup.sh dev  O  sudo bash setup.sh prod"
+    echo " Error: L'entorn ha de ser 'dev' o 'prod'."
+    echo " Ús correcte: sudo bash setup.sh dev  O  sudo bash setup.sh prod"
     exit 1
 fi
 
-echo "🚀 Iniciant configuració del servidor per a l'entorn: [ $ENTORN ]"
+echo " Iniciant configuració del servidor per a l'entorn: [ $ENTORN ]"
 
 # --- VARIABLES ---
 SERVER_NAME="localhost" # A Prod hauria de ser el domini real
@@ -34,7 +34,7 @@ echo "--- 3. APLICANT DIFERÈNCIES DEV / PROD ---"
 # Aquí utilitzem 'sed' per buscar i reemplaçar línies als fitxers de configuració
 
 if [ "$ENTORN" == "prod" ]; then
-    echo "🔒 Aplicant configuracions de PRODUCCIÓ (Seguretat i Rendiment)..."
+    echo " Aplicant configuracions de PRODUCCIÓ (Seguretat i Rendiment)..."
     
     # PHP: Ocultar errors perquè no els vegin els usuaris
     sudo sed -i 's/display_errors = On/display_errors = Off/g' $PHP_INI
@@ -48,7 +48,7 @@ if [ "$ENTORN" == "prod" ]; then
     sudo sed -i 's/ServerSignature On/ServerSignature Off/g' $APACHE_SEC
 
 else
-    echo "🐛 Aplicant configuracions de DEVELOP (Depuració)..."
+    echo " Aplicant configuracions de DEVELOP (Depuració)..."
     
     # PHP: Mostrar errors per facilitar la feina als programadors
     sudo sed -i 's/display_errors = Off/display_errors = On/g' $PHP_INI
@@ -59,6 +59,7 @@ fi
 
 echo "--- 4. CONFIGURANT APACHE (VIRTUALHOST) ---"
 sudo mkdir -p $PROJECT_DIR/public
+# Assignem el propietari base
 sudo chown -R $USER:www-data $PROJECT_DIR
 
 sudo a2enmod rewrite
@@ -72,12 +73,14 @@ sudo bash -c "cat > /etc/apache2/sites-available/symfony.conf <<EOF
     # Variable dinàmica! Apache dirà a Symfony si és dev o prod
     SetEnv APP_ENV $ENTORN
     
+    # Rutes absolutes i variables d'Apache pels logs
     ErrorLog \${APACHE_LOG_DIR}/backend_error.log
     CustomLog \${APACHE_LOG_DIR}/backend_access.log combined
 
     <Directory $PROJECT_DIR/public>
         AllowOverride None
         Require all granted
+        # El Front Controller pattern de Symfony
         FallbackResource /index.php
     </Directory>
 </VirtualHost>
@@ -88,9 +91,10 @@ sudo a2dissite 000-default.conf
 sudo a2ensite symfony.conf
 sudo systemctl restart apache2
 
-# Permisos ACL (Igual per a tots dos)
+# Donem permisos d'escriptura a les carpetes de cache i log 
+# tant per a l'usuari 'ubuntu' (qui executa les comandes) com 'www-data' (Apache)
 sudo mkdir -p $PROJECT_DIR/var
 sudo setfacl -R -m u:www-data:rwX -m u:$USER:rwX $PROJECT_DIR/var
 sudo setfacl -dR -m u:www-data:rwX -m u:$USER:rwX $PROJECT_DIR/var
 
-echo "✅ INSTAL·LACIÓ COMPLETADA PER A L'ENTORN: $ENTORN"
+echo " INSTAL·LACIÓ COMPLETADA PER A L'ENTORN: $ENTORN"

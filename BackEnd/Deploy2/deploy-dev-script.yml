@@ -1,0 +1,96 @@
+name: Deploy DEV (Auto-Provisioning + Backend)
+
+on:
+  push:
+    branches:
+      - develop
+  # Permet executar el workflow manualment des de la pestanya "Actions" de GitHub
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Baixar el codi del repositori al Runner
+        uses: actions/checkout@v4
+
+      # APRENENTATGE: Configurem la connexió segura de forma manual per entendre el protocol SSH
+      - name: 2. Configurar SSH i Known Hosts manualment
+        run: |
+          mkdir -p ~/.ssh/
+          # Guardem la clau privada d'AWS al runner temporal
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # Afegim la IP al fitxer known_hosts per evitar que el terminal ens demani confirmació (yes/no)
+          ssh-keyscan -H ${{ vars.EC2_HOST }} >> ~/.ssh/known_hosts
+
+      # APRENENTATGE (IDEMPOTÈNCIA): El runner comprova si la màquina d'AWS ja té Apache configurat.
+      # Si no el té, puja l'script full-setup.sh i el llança. Si ja el té, se salta aquest pas automàticament.
+      - name: 3. Avaluar estat del servidor i provisionar si cal
+        run: |
+          # Copiem l'script d'instal·lació a la instància EC2
+          scp ./full-setup.sh ${{ vars.EC2_USER }}@${{ vars.EC2_HOST }}:/home/${{ vars.EC2_USER }}/full-setup.sh
+
+          # Ens hi connectem i executem la lògica
+          ssh ${{ vars.EC2_USER }}@${{ vars.EC2_HOST }} << 'EOF'
+            echo " Comprovant l'estat del servidor..."
+            
+            if [ ! -f "/etc/apache2/sites-available/backend.conf" ]; then
+                echo " El servidor és NOU. Iniciant instal·lació d'Apache, PHP i eines..."
+                
+                # Donem permisos i executem passant els paràmetres: entorn=dev rol=all
+                chmod +x /home/${{ vars.EC2_USER }}/full-setup.sh
+                sudo bash /home/${{ vars.EC2_USER }}/full-setup.sh dev all
+                
+                echo " Servidor provisionat correctament."
+            else
+                echo " El servidor ja estava configurat. Ometent la instal·lació base."
+            fi
+            
+            # Netegem l'script del directori home per no deixar brossa
+            rm /home/${{ vars.EC2_USER }}/full-setup.sh
+          EOF
+
+      # APRENENTATGE: Sincronitzem només el codi font.
+      # Excloem la carpeta 'vendor' perquè a DEV volem que el servidor faci el composer install.
+      - name: 4. Sincronitzar fitxers amb RSYNC
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'var/' \
+            --exclude 'vendor/' \
+            --exclude '.env.local' \
+            --exclude 'full-setup.sh' \
+            ./ ${{ vars.EC2_USER }}@${{ vars.EC2_HOST }}:/var/www/backend/
+
+      # APRENENTATGE: Un cop el codi està al servidor, ens hi connectem per executar
+      # les tasques pròpies del cicle de vida d'una aplicació Symfony.
+      - name: 5. Executar comandes de Symfony via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.EC2_HOST }}
+          username: ${{ vars.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo " Iniciant post-desplegament de Symfony..."
+            cd /var/www/backend
+
+            # 1. Instal·lar dependències dins del servidor (Ideal per DEV)
+            export COMPOSER_ALLOW_SUPERUSER=1
+            composer install --optimize-autoloader
+
+            # 2. Netejar la memòria cau de l'entorn de desenvolupament
+            php bin/console cache:clear --env=dev
+
+            # 3. Executar migracions a la base de dades automàticament (opcional)
+            php bin/console doctrine:migrations:migrate --no-interaction || true
+
+            # 4. REFORÇ DE PERMISOS (Vital): 
+            # Quan fem RSYNC de fitxers nous, a vegades perden l'ACL original. 
+            # Les tornem a aplicar a la carpeta var/ per assegurar que Apache i l'usuari no col·lisionin.
+            sudo setfacl -R -m u:www-data:rwX -m u:${{ vars.EC2_USER }}:rwX var/
+            sudo setfacl -dR -m u:www-data:rwX -m u:${{ vars.EC2_USER }}:rwX var/
+
+            echo " Desplegament de DEV finalitzat amb èxit!"

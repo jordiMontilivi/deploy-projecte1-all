@@ -1,0 +1,164 @@
+name: Deploy Backend (DEV & PROD)
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+
+  # Permet executar el workflow manualment des de la pestanya "Actions" de GitHub
+  workflow_dispatch:
+
+# Definim variables globals que canvien segons la branca que dispara l'acció
+env:
+  # Lògica ternària: Si la branca és 'main', el valor és l'opció 1, sinó l'opció 2
+  TARGET_ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+  TARGET_ROLE: ${{ github.ref == 'refs/heads/main' && 'backend' || 'all' }}
+  TARGET_HOST: ${{ github.ref == 'refs/heads/main' && vars.EC2_HOST_PROD || vars.EC2_HOST }}
+  TARGET_KEY: ${{ github.ref == 'refs/heads/main' && secrets.EC2_SSH_KEY_PROD || secrets.EC2_SSH_KEY }}
+  TARGET_USER: ${{ vars.EC2_USER }} # Assumim que l'usuari (ex: ubuntu) és el mateix
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Baixar el codi del repositori
+        uses: actions/checkout@v4
+
+      # --- BLOC DE COMPILACIÓ (NOMÉS PROD) ---
+      - name: 2. Setup PHP (Només PROD)
+        if: github.ref == 'refs/heads/main'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+
+      # PROFESSIONAL: A Producció compilem les dependències al Runner (GitHub)
+      # Fem un desplegament per Artifacts que inclou la carpeta vendor ja compilada,
+      # així evitem que el servidor de Producció hagi de compilar res i només s'encarregui de servir el codi.
+      # No es exactament el mateix tipus de desplegament per artifacts que us vaig explicar quan volia fer desplegaments amb alb i asg
+      # ja que en aquell moment haviem de crear un artifact manualment i pujar-lo a S3, però el concepte és similar:
+      # preparar un paquet de codi ja llest per a Producció i pujar-lo directament al servidor sense que aquest hagi de fer res més que servir-lo.
+      # Això assegura que si Composer falla, el desplegament s'atura abans de tocar el servidor
+      - name: 3. Construir Vendor (Només PROD)
+        if: github.ref == 'refs/heads/main'
+        run: composer install --no-dev --optimize-autoloader --no-progress
+
+      # --- BLOC DE PREPARACIÓ DEL SERVIDOR (COMPARTIT) ---
+      - name: 4. Configurar SSH i Known Hosts manualment
+        run: |
+          mkdir -p ~/.ssh/
+          # Guardem la clau privada d'AWS al runner temporal
+          echo "${{ env.TARGET_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          # Afegim la IP al fitxer known_hosts per evitar que el terminal ens demani confirmació (yes/no)
+          ssh-keyscan -H ${{ env.TARGET_HOST }} >> ~/.ssh/known_hosts
+
+      # APRENENTATGE: Pugem l'script i l'executem.
+      # L'script és "idempotent", ell mateix decidirà si ha d'instal·lar coses o no fer res.
+      - name: 5. Provisionar servidor base
+        run: |
+          scp ./full-setup.sh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/home/${{ env.TARGET_USER }}/full-setup.sh
+
+          # Executem l'script i, independentment de si falla o funciona, l'esborrem al final
+          ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} "chmod +x full-setup.sh && sudo bash full-setup.sh dev all; rm -f full-setup.sh"
+
+      # --- BLOC DE PREPARACIÓ DEL SERVIDOR (COMPARTIT) ---
+      # Amb aquest bloc el runner comprova si la instància EC2 ja està configurada... Ara ho tenim a l'script full-setup.sh...
+      # Es millor tenir-ho a l'script perquè si en algun futur canviem de servidor de repositoris o tecnologia de desplegament CICD (Ex: Jenkins, GitLab CI, etc.) només haurem de canviar l'script i no el workflow.
+      # A més, si en algun futur volem fer un desplegament manual (sense passar per GitHub Actions) també podrem reutilitzar el mateix script per preparar el servidor.
+
+      # - name: 5. Provisionar servidor base (Idempotent)
+      #   run: |
+      #     scp ./full-setup.sh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/home/${{ env.TARGET_USER }}/full-setup.sh
+
+      #     ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} << EOF
+      #       echo "Comprovant l'estat del servidor per a l'entorn: ${{ env.TARGET_ENV }}..."
+
+      #       # Comprovem si el VirtualHost ja existeix
+      #       if [ ! -f "/etc/apache2/sites-available/backend.conf" ]; then
+      #           echo "El servidor és NOU. Iniciant instal·lació..."
+      #           chmod +x /home/${{ env.TARGET_USER }}/full-setup.sh
+      #           sudo bash /home/${{ env.TARGET_USER }}/full-setup.sh ${{ env.TARGET_ENV }} ${{ env.TARGET_ROLE }}
+      #           echo "Servidor provisionat correctament."
+      #       else
+      #           echo "⚡ El servidor ja estava configurat. Ometent la instal·lació base."
+      #       fi
+
+      #       rm -f /home/${{ env.TARGET_USER }}/full-setup.sh
+      #     EOF
+
+      # --- BLOC DE SINCRONITZACIÓ (BIFURCAT) ---
+      # Sincronitzem només el codi font.
+      # DEV exclou el vendor (es fa al servidor) ja que fem el composer install al servidor
+      - name: 6A. Sincronitzar fitxers RSYNC (DEV)
+        if: github.ref == 'refs/heads/develop' # detecta que està a la branca develop
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' --exclude '.github/' \
+            --exclude 'var/' --exclude 'vendor/' \
+            --exclude '.env.local' --exclude 'full-setup.sh' \
+            ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
+
+      # PROD inclou el vendor ja compilat al Runner, així el servidor de Producció només s'encarrega de servir el codi sense haver de compilar res.
+      - name: 6B. Sincronitzar fitxers RSYNC (PROD)
+        if: github.ref == 'refs/heads/main' # detecta que està a la branca main
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' --exclude '.github/' \
+            --exclude 'var/' --exclude 'tests/' \
+            --exclude 'full-setup.sh' \
+            ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
+
+      # --- BLOC DE POST-DESPLEGAMENT SYMFONY (BIFURCAT) ---
+
+      - name: 7. Executar tasques Symfony post-desplegament
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.TARGET_HOST }}
+          username: ${{ env.TARGET_USER }}
+          key: ${{ env.TARGET_KEY }}
+          script: |
+            # Ara configurem/executem el composer dintre de la instància EC2 segons si estem a DEV o PROD.
+            echo " Iniciant post-desplegament de Symfony per a l'entorn: ${{ env.TARGET_ENV }}"
+            cd /var/www/backend
+
+            # Lògica condicional de Bash avaluada a dins del servidor AWS
+            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
+                echo " Aplicant configuracions exclusives de DEV..."
+
+                # 1. Instal·lar dependències dins del servidor (Ideal per DEV)
+                export COMPOSER_ALLOW_SUPERUSER=1
+                composer install --optimize-autoloader
+
+                # 2. Netejar la memòria cau de l'entorn de desenvolupament
+                php bin/console cache:clear --env=dev
+
+                # 3. Executar migracions a la base de dades automàticament (opcional)
+                php bin/console doctrine:migrations:migrate --no-interaction || true
+            else
+                echo " Aplicant configuracions exclusives de PROD..."
+
+                # 1. Generar la caché de Symfony optimitzada
+                APP_ENV=prod php bin/console cache:clear
+
+                # 2. Executar migracions a la BD RDS
+                APP_ENV=prod php bin/console doctrine:migrations:migrate --no-interaction || true
+
+                # 3. Optimització de memòria d'escriptura de PHP (Opcional però professional)
+                APP_ENV=prod php bin/console opcache:clear || true
+            fi
+
+            # --- TASQUES COMPARTIDES ---
+            # 4. REFORÇ DE PERMISOS (Vital): 
+            # Quan fem RSYNC de fitxers nous, a vegades perden l'ACL original. 
+            # Les tornem a aplicar a la carpeta var/ per assegurar que Apache i l'usuari no col·lisionin.
+            # Això s'executarà sempre, independentment de si és dev o prod
+            echo " Re-aplicant permisos a la carpeta var/..."
+            sudo setfacl -R -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
+            sudo setfacl -dR -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
+
+            echo " Desplegament finalitzat amb èxit!"

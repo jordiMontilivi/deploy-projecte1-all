@@ -2,14 +2,14 @@ name: Deploy Backend a PROD (EC2 Bare Metal)
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Baixant el codi del repositori
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -17,6 +17,11 @@ jobs:
           php-version: "8.3"
 
       # PROFESSIONAL: A Producció compilem les dependències al Runner (GitHub)
+      # Fem un desplegament per Artifacts que inclou la carpeta vendor ja compilada,
+      # així evitem que el servidor de Producció hagi de compilar res i només s'encarregui de servir el codi.
+      # No es exactament el mateix tipus de desplegament per artifacts que us vaig explicar quan volia fer desplegaments amb alb i asg
+      # ja que en aquell moment haviem de crear un artifact manualment i pujar-lo a S3, però el concepte és similar:
+      # preparar un paquet de codi ja llest per a Producció i pujar-lo directament al servidor sense que aquest hagi de fer res més que servir-lo.
       # Això assegura que si Composer falla, el desplegament s'atura abans de tocar el servidor
       - name: Construir Vendor de Producció
         run: |
@@ -50,13 +55,13 @@ jobs:
 
             # 1. Generar la caché de Symfony optimitzada
             APP_ENV=prod php bin/console cache:clear
-            
+
             # 2. Re-aplicar permisos per si s'han creat nous fitxers
             sudo setfacl -R -m u:www-data:rwX -m u:ubuntu:rwX var/
             sudo setfacl -dR -m u:www-data:rwX -m u:ubuntu:rwX var/
 
             # 3. Executar migracions a la BD RDS
             APP_ENV=prod php bin/console doctrine:migrations:migrate --no-interaction
-            
+
             # 4. Optimització de memòria d'escriptura de PHP (Opcional però professional)
             APP_ENV=prod php bin/console opcache:clear || true

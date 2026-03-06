@@ -21,25 +21,25 @@ jobs:
 
     steps:
       # Pas 1: Descarregar el codi del nostre repositori a la màquina virtual de GitHub
-      - name: 📥 Descarregar el codi del repositori
+      - name: Descarregar el codi del repositori
         uses: actions/checkout@v4
 
       # Pas 2: Preparar l'eina Node.js (necessària per compilar Vue)
-      - name: ⚙️ Configurar l'entorn de Node.js
+      - name: Configurar l'entorn de Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       # Pas 3: Instal·lar totes les llibreries que necessita el projecte de forma neta
-      - name: 📦 Instal·lar dependències del projecte
+      - name: Instal·lar dependències del projecte
         run: npm ci
 
       # Pas 4: Convertir el codi Vue en web estàndard (Genera la carpeta 'dist')
-      - name: 🏗️ Compilar l'aplicació Vue.js
+      - name: Compilar l'aplicació Vue.js
         run: npm run build
 
       # Pas 5: Enviar la carpeta 'dist' al nostre servidor EC2
-      - name: 🚀 Enviar els fitxers compilats al servidor
+      - name: Enviar els fitxers compilats al servidor
         uses: appleboy/scp-action@v0.1.4
         with:
           # LA MÀGIA CONDICIONAL:
