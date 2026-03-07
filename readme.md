@@ -22,8 +22,8 @@ ENTORN=${1:-dev}
 ROL=${2:-all} # all, frontend, backend
 
 if [[ ! "$ENTORN" =~ ^(dev|prod)$ ]] || [[ ! "$ROL" =~ ^(all|frontend|backend)$ ]]; then
-    echo "❌ Error de sintaxi."
-    echo "👉 Ús: sudo bash setup.sh [dev|prod] [all|frontend|backend]"
+    echo " Error de sintaxi."
+    echo " Ús: sudo bash setup.sh [dev|prod] [all|frontend|backend]"
     echo "Exemples:"
     echo "  sudo bash setup.sh dev all       (Front i Back junts per a proves)"
     echo "  sudo bash setup.sh prod frontend (Només servidor Vue per a Prod)"
@@ -104,7 +104,7 @@ fi
 
 # --- 4. LÒGICA DEL FRONTEND (VUE) ---
 if [ "$ROL" == "all" ] || [ "$ROL" == "frontend" ]; then
-    echo "🎨 Configurant requeriments de FRONTEND..."
+    echo " Configurant requeriments de FRONTEND..."
 
     sudo mkdir -p $FRONTEND_DIR
     sudo chown -R $USER:www-data /var/www/frontend
@@ -138,13 +138,13 @@ EOF"
 fi
 
 # --- 5. NETEJA I REINICI ---
-echo "🔄 Aplicant canvis a Apache..."
+echo " Aplicant canvis a Apache..."
 sudo a2dissite 000-default.conf
 sudo systemctl restart apache2
 
-echo "✅ INSTAL·LACIÓ COMPLETADA AMB ÈXIT!"
+echo " INSTAL·LACIÓ COMPLETADA AMB ÈXIT!"
 if [ "$ROL" == "all" ]; then
-    echo "🌐 Frontend accessible al port 80 (http://IP)"
+    echo " Frontend accessible al port 80 (http://IP)"
     echo "🔌 Backend accessible al port 8000 (http://IP:8000) -> Recorda obrir-lo al Security Group d'AWS!"
 fi
 

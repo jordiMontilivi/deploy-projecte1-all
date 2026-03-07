@@ -22,7 +22,7 @@ env:
   TARGET_USER: ${{ vars.EC2_USER }} # Assumim que l'usuari (ex: ubuntu) és el mateix
 
 jobs:
-  deploy:
+  deploy-backend:
     runs-on: ubuntu-latest
 
     steps:
@@ -104,6 +104,7 @@ jobs:
             ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
 
       # PROD inclou el vendor ja compilat al Runner, així el servidor de Producció només s'encarrega de servir el codi sense haver de compilar res.
+      # Haureu de modificar-lo lleugerament si decidiu fer un
       - name: 6B. Sincronitzar fitxers RSYNC (PROD)
         if: github.ref == 'refs/heads/main' # detecta que està a la branca main
         run: |
@@ -143,7 +144,8 @@ jobs:
                 echo " Aplicant configuracions exclusives de PROD..."
 
                 # 1. Generar la caché de Symfony optimitzada
-                APP_ENV=prod php bin/console cache:clear
+                APP_ENV=prod php bin/console cache:clear --no-debug
+                APP_ENV=prod php bin/console cache:warmup
 
                 # 2. Executar migracions a la BD RDS
                 APP_ENV=prod php bin/console doctrine:migrations:migrate --no-interaction || true

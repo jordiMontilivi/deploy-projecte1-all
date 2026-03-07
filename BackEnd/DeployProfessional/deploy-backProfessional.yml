@@ -1,0 +1,211 @@
+name: Symfony CI/CD Pipeline
+
+on:
+  push:
+    branches: [develop, main]
+
+  pull_request:
+    branches: [develop]
+
+  workflow_dispatch:
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+
+  SERVER_HOST: ${{ github.ref == 'refs/heads/main' && vars.EC2_HOST_PROD || vars.EC2_HOST }}
+  SERVER_USER: ${{ vars.EC2_USER }}
+
+  SSH_KEY: ${{ github.ref == 'refs/heads/main' && secrets.EC2_SSH_KEY_PROD || secrets.EC2_SSH_KEY }}
+
+  DEPLOY_PATH: /var/www/backend
+
+jobs:
+  # =====================================================
+  # CI - TESTS
+  # =====================================================
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          tools: composer
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('**/composer.lock') }}
+
+      - name: Install dependencies
+        run: composer install --no-interaction
+
+      - name: Run Symfony tests
+        run: |
+          if [ -f phpunit.xml ]; then
+            ./vendor/bin/phpunit
+          else
+            echo "No tests found"
+          fi
+
+  # =====================================================
+  # BUILD ARTIFACT
+  # =====================================================
+
+  build:
+    needs: test
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+
+      - name: Install production dependencies
+        run: |
+
+          composer install \
+            --no-dev \
+            --optimize-autoloader \
+            --no-interaction
+
+      - name: Create build artifact
+        run: |
+
+          tar -czf release.tar.gz \
+          --exclude=.git \
+          --exclude=tests \
+          .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-release
+          path: release.tar.gz
+
+  # =====================================================
+  # DEPLOY
+  # =====================================================
+
+  deploy:
+    needs: build
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-release
+
+      - name: Configure SSH
+        run: |
+
+          mkdir -p ~/.ssh
+          echo "${{ env.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan -H ${{ env.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy release
+        run: |
+
+          RELEASE=$(date +%Y%m%d%H%M%S)
+
+          echo "Deploying release $RELEASE"
+
+          scp release.tar.gz \
+          ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }}:/tmp/
+
+
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} << EOF
+
+          set -e
+
+          RELEASE_PATH=${{ env.DEPLOY_PATH }}/releases/$RELEASE
+
+          mkdir -p \$RELEASE_PATH
+
+          tar -xzf /tmp/release.tar.gz -C \$RELEASE_PATH
+
+          cd \$RELEASE_PATH
+
+          ln -s ${{ env.DEPLOY_PATH }}/shared/.env.local .env.local
+
+          ln -s ${{ env.DEPLOY_PATH }}/shared/var var
+
+
+          php bin/console cache:clear --env=${{ env.APP_ENV }}
+
+          php bin/console cache:warmup --env=${{ env.APP_ENV }}
+
+          php bin/console doctrine:migrations:migrate \
+              --allow-no-migration \
+              --no-interaction
+
+
+          echo "Switching symlink"
+
+          ln -sfn \$RELEASE_PATH ${{ env.DEPLOY_PATH }}/current
+
+
+          sudo systemctl reload apache2
+
+          EOF
+
+      # =====================================================
+      # HEALTH CHECK
+      # =====================================================
+
+      - name: Health check
+        run: |
+
+          echo "Checking application health..."
+
+          sleep 5
+
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ env.SERVER_HOST }}/api/health)
+
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check failed"
+            exit 1
+          fi
+
+      # =====================================================
+      # ROLLBACK AUTOMÀTIC
+      # =====================================================
+
+      - name: Rollback if deploy failed
+        if: failure()
+        run: |
+
+          echo "Rollback deployment"
+
+          ssh ${{ env.SERVER_USER }}@${{ env.SERVER_HOST }} << EOF
+
+          cd ${{ env.DEPLOY_PATH }}/releases
+
+          PREVIOUS=$(ls -t | sed -n 2p)
+
+          ln -sfn ${{ env.DEPLOY_PATH }}/releases/\$PREVIOUS \
+                  ${{ env.DEPLOY_PATH }}/current
+
+          sudo systemctl reload apache2
+
+          echo "Rollback completed"
+
+          EOF

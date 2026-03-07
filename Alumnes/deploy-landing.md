@@ -1,10 +1,8 @@
-Landing Page
-
-# !!! ⚠️⚠️⚠️⚠️ RECORDATORI: Les credencials s'han de configurar com a secrets al repositori (Settings > Secrets and variables > Actions) CADA VEGADA QUE OBRIM EL LAB D'ACADEMY, ja que caduquen ⚠️⚠️⚠️ !!!
+## LANDING PAGE
 
 ### Guia de passos a tenir en compte per fer un desplegament de la landing page a un bucket S3 amb possibilitat de teniru un CloudFront
 
-## He intentat fer un desplegament únic per a prod i dev, només canviant les variables d'entorn segons la branca. Així evitem tenir dos workflows pràcticament idèntics i mantenim tot més net.
+### He intentat fer un desplegament únic per a prod i dev, només canviant les variables d'entorn segons la branca. Així evitem tenir dos workflows pràcticament idèntics i mantenim tot més net.
 
 Perquè el desplegament funcioni correctament, has d'entendre què està passant "sota el capó":
 
@@ -12,8 +10,8 @@ Perquè el desplegament funcioni correctament, has d'entendre què està passant
 2. **Assignar el Runner:** GitHub reserva una màquina virtual (ubuntu-latest) on s'executaran totes les comandes.
 3. **Determinar l'entorn amb lògica ternària:**
 
-- Si el trigger ve de `main`, el sistema assignarà les variables de **Producció**.
-- Si ve de `develop`, el sistema assignarà les de **Desenvolupament**.
+   - Si el trigger ve de `main`, el sistema assignarà les variables de **Producció**.
+   - Si ve de `develop`, el sistema assignarà les de **Desenvolupament**.
 
 4. **Preparar l'espai de treball:** Es descarrega el codi del repositori (checkout) i s'injecten les credencials temporals d'AWS Academy (Secrets).
 5. **Sincronització de fitxers:** S'utilitza la comanda `aws s3 sync`. Tingues en compte que els fitxers de configuració de Git (`.git`) s'han d'excloure per seguretat.
@@ -35,5 +33,3 @@ Abans de fer el primer `push`, assegura't de tenir creades i actualitzades les v
 | `AWS_REGION`          | La regió (ex: `us-east-1`)                               |
 
 **Recordatori final:** Recorda que els **Secrets** d'AWS (`Access Key`, `Secret Key` i `Session Token`) caduquen. Si el deploy et dona un error de "Forbidden", el primer que has de fer és revisar si les credencials del laboratori han canviat!
-
- 

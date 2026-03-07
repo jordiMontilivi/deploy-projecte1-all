@@ -1,0 +1,205 @@
+name: Deploy Backend (DEV & PROD)
+
+# Aquest workflow s'executa en tres situacions:
+
+on:
+  push:
+    branches: [develop, main]
+
+  pull_request:
+    branches: [develop]
+
+  workflow_dispatch:
+
+# VARIABLES GLOBALS
+# Definim variables que canvien segons la branca.
+
+env:
+  # Si la branca és main → prod
+  # Si la branca és develop → dev
+  TARGET_ENV: #!!! poseu prod o dev segons la branca que dispareu
+  # Rol del servidor (exemple didàctic)
+  TARGET_ROLE: ${{ github.ref == 'refs/heads/main' && 'backend' || 'all' }}
+  # Host EC2 diferent per dev i prod
+  TARGET_HOST: ${{ github.ref == 'refs/heads/main' && vars.EC2_HOST_PROD || vars.EC2_HOST }}
+  # Clau SSH diferent per dev i prod
+  TARGET_KEY: #!!! poseu la key de secrets de prod o dev segons la branca que dispareu
+  # Usuari de la instància EC2
+  TARGET_USER: ${{ vars.EC2_USER }}
+
+# JOB PRINCIPAL
+
+jobs:
+  deploy-backend:
+    # El runner és una màquina virtual Linux que GitHub
+    # crea temporalment per executar el workflow.
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. DESCARREGAR EL CODI
+
+      # Clona el repositori dins del runner.
+      # És el primer pas de gairebé tots els workflows.
+
+      -  #!!! dererminar el nom a la primera action
+        #!!! feu la primera aciton per clonar el codi al runner
+
+      # 2. CONFIGURAR PHP AL RUNNER
+
+      # Necessitem PHP perquè Symfony utilitza Composer
+      # i comandes CLI durant el pipeline.
+
+      - name: 2. Instal·lar PHP al runner (!!! Només PROD)
+        if: #!!! github.ref == busca la forma de referirse a la branca main
+        uses: #!!! poseu aquí l'acció de setup-php que us vaig explicar a classe de shivammathur
+        with:
+          php-version: #!!! poseu la versió de PHP que necessiteu
+          tools: composer
+
+      # 3. CACHE DE COMPOSER
+
+      # Evita descarregar dependències cada vegada.
+      # Això pot accelerar el pipeline entre un 50% i 80%.
+
+      - name: 3. Cache de dependències Composer
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache@v4
+        with:
+          path: ~/.composer/cache
+          # La clau del cache depèn del fitxer composer.lock
+          # Si el lock canvia, el cache es reconstrueix.
+          key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      # 4. BUILD DE DEPENDÈNCIES (NOMÉS PROD)
+
+      # En producció compilem el vendor al runner.
+      # Això evita que el servidor EC2 hagi de compilar.
+
+      - name: 4. Construir dependències (PROD)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "Instal·lant dependències optimitzades per producció"
+          # Investiga quines opcions de Composer fan que el projecte sigui més ràpid en producció
+          #!!! intal·la composer (sense dependències dev, autoload optimitzat, sense progress ni interacció)
+
+      # 5. CONFIGURACIÓ SSH
+
+      # Necessitem SSH per connectar amb la instància EC2.
+
+      - name: 5. Configurar connexió SSH
+        run: |
+          # Crear carpeta .ssh si no existeix
+          #!!! crea la carpeta .ssh dins del runner
+
+          # Guardem la clau privada dins el runner
+          echo "${{ env.TARGET_KEY }}" > ~/.ssh/id_rsa
+
+          # Permisos estrictes per seguretat
+          #!!! canvia els permisos de la clau privada a 600
+
+          # Afegim el servidor al fitxer known_hosts
+          # per evitar preguntes interactives
+          ssh-keyscan -H ${{ env.TARGET_HOST }} >> ~/.ssh/known_hosts
+
+      # 6. PROVISIONAR SERVIDOR
+
+      # Copiem un script que prepara el servidor EC2.
+      # Aquest script és idempotent: pot executar-se múltiples vegades sense trencar res.
+      # Així, si el servidor ja està preparat, el script no farà res i el pipeline continuarà.
+
+      - name: 6. Provisionar servidor
+        run: |
+          #!!! Copia el script full-setup.sh al servidor EC2 utilitzant SCP 
+
+          ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} << 'EOF'
+
+            #!!! donem permisos d'execució al script
+
+            # Executem l'script amb sudo
+            #!!! executa script passa els paràmetres d'entorn i rol al script (dev/prod i backend/all) recorda que els tens definits a les variables globals
+
+            #!!! després d'executar l'script, independentment de si falla o no, l'esborrem per no deixar brossa al servidor
+
+          EOF
+
+      # 7A. SINCRONITZACIÓ RSYNC (DEV)
+
+      # En desenvolupament excloem vendor perquè
+      # Composer s'executarà al servidor.
+
+      - name: 7A. Sincronitzar fitxers (DEV)
+        if: github.ref == 'refs/heads/develop'
+        run: |
+
+          #!!! utilitza RSYNC per sincronitzar els fitxers del runner al servidor EC2, excloent les carpetes i fitxers que no volem enviar (.git, .github, vendor, var, .env.local, etc.)
+
+      # 7B. SINCRONITZACIÓ RSYNC (PROD)
+      # En producció sí que enviem vendor ja que el build s'ha fet al runner en el punt 4.
+      # Aquest deploy s'anomena artifact-based deployment, ja que el runner construeix un artifact (el vendor) que després s'envia al servidor.
+      # Si heu decidit (opcional) tenir les variables sensibles amb symfony clau publica i privada, heu d'evitar pujar la clau privada que la tens en config/secrets/prod/
+
+      - name: 7B. Sincronitzar fitxers (PROD)
+        if: github.ref == 'refs/heads/main'
+        run: |
+
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'var/' \
+            --exclude 'tests/' \
+            ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
+
+      # 8. TASQUES POST-DESPLEGAMENT SYMFONY
+      # Un cop el codi està al servidor, necessitem executar algunes tasques pròpies del cicle de vida d'una aplicació Symfony:
+      # si estem en dev hem de fer composer install
+      # tant dev com prod hem de -> Netejar la cache, Executar migracions de base de dades, ...
+
+      - name: 8. Post deploy Symfony
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: #!!! la IP o host del servidor EC2 variable global
+          username: ${{ env.TARGET_USER }}
+          key: #!!! la clau SSH variable global
+          script: |
+
+            echo "Iniciant configuració Symfony"
+
+            #!!! ens situem al directori on està el projecte Symfony
+
+            if [ "${{ env.TARGET_ENV }}" = "dev" ]; then
+                echo "Configuració per DEV"
+                export COMPOSER_ALLOW_SUPERUSER=1
+
+                #!!! assignar APP_ENV a dev i executar un composer install optimitzant autoloaders
+
+                #!!! neteja cache de Symfony per a l'entorn de desenvolupament
+
+                #!!! Completa la comanda per executar les migracions de Doctrine de forma segura (sense error si no hi ha migracions ni interaccions)
+                # php bin/console __________
+
+
+            else
+                echo "Configuració per PRODUCCIÓ"
+
+                APP_ENV=prod php bin/console cache:clear --no-debug
+                APP_ENV=prod php bin/console cache:warmup
+
+                #!!! Completa la comanda per executar les migracions de Doctrine de forma segura (sense error si no hi ha migracions ni interaccions)
+                # APP_ENV=prod php bin/console __________
+
+
+            fi
+
+
+            # PERMISOS
+            # Symfony necessita permisos sobre var/
+
+            echo "Aplicar permisos correctes"
+
+            sudo setfacl -R -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
+            sudo setfacl -dR -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
+
+            #!!! reload apache2
+
+            echo "Deploy completat"
