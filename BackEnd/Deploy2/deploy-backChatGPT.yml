@@ -78,7 +78,7 @@ jobs:
       - name: 7A. Sync files (DEV)
         if: github.ref == 'refs/heads/develop'
         run: |
-          rsync -az --delete \
+          rsync -avz --delete-delay \
             --exclude '.git/' \
             --exclude '.github/' \
             --exclude 'var/' \
@@ -90,7 +90,7 @@ jobs:
       - name: 7B. Sync files (PROD)
         if: github.ref == 'refs/heads/main'
         run: |
-          rsync -az --delete \
+          rsync -avz --delete-delay \
             --exclude '.git/' \
             --exclude '.github/' \
             --exclude 'var/' \

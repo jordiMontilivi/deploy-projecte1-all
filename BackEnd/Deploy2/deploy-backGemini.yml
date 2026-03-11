@@ -61,7 +61,7 @@ jobs:
       - name: 6A. Sincronitzar fitxers RSYNC (DEV)
         if: github.ref == 'refs/heads/develop'
         run: |
-          rsync -avz --delete \
+          rsync -avz --delete-delay \
             --exclude '.git/' --exclude '.github/' \
             --exclude 'var/' --exclude 'vendor/' \
             --exclude '.env.local' --exclude 'full-setup.sh' \
@@ -70,7 +70,7 @@ jobs:
       - name: 6B. Sincronitzar fitxers RSYNC (PROD)
         if: github.ref == 'refs/heads/main'
         run: |
-          rsync -avz --delete \
+          rsync -avz --delete-delay \
             --exclude '.git/' --exclude '.github/' \
             --exclude 'var/' --exclude 'tests/' \
             --exclude 'full-setup.sh' \

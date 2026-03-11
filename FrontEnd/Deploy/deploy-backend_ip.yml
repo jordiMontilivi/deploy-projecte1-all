@@ -1,0 +1,35 @@
+name: Update Backend IP on Frontend
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  # Determina l'entorn segons la branca
+  TARGET_ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+
+jobs:
+  update-backend-ip:
+    if: env.TARGET_ENV == 'prod'    # Només executar si és prod
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update backend IP on frontend EC2
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.FRONTEND_HOST }}      # IP pública del frontend
+          username: ubuntu
+          key: ${{ secrets.EC2_KEY }}             # Clau privada SSH
+          script: |
+            echo "Actualitzant IP del backend al frontend..."
+            BACKEND_IP="${{ secrets.BACKEND_IP }}"
+
+            # Substitueix la línia Define BACKEND_IP dins del VirtualHost
+            sudo sed -i "s/^Define BACKEND_IP .*/Define BACKEND_IP $BACKEND_IP/" /etc/apache2/sites-available/frontend.conf
+
+            # Recarrega Apache per aplicar la nova IP
+            sudo systemctl reload apache2
+
+            echo "IP del backend actualitzada a $BACKEND_IP"

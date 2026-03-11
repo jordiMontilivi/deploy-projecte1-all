@@ -58,12 +58,17 @@ install_base_packages() {
 
     sudo apt-get install -y \
         apache2 \
-        git \
         unzip \
         curl \
         acl
 
     sudo a2enmod rewrite
+
+    # Instal·lar mòduls proxy només al frontend i només si és prod
+    if [[ "$ROL" == "frontend" && "$ENTORN" == "prod" ]]; then
+        sudo a2enmod proxy
+        sudo a2enmod proxy_http
+    fi
 
 }
 
@@ -85,7 +90,11 @@ install_php() {
 
 }
 
-install_composer() {
+install_composer_dev() {
+
+    if [[ "$ENTORN" != "dev" ]]; then
+        return
+    fi
 
     if command -v composer >/dev/null 2>&1; then
         echo "Composer ja està instal·lat"
@@ -203,6 +212,8 @@ RewriteBase /
 
 RewriteRule ^index\.html$ - [L]
 
+RewriteCond %{REQUEST_URI} !^/api
+
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 
@@ -213,6 +224,19 @@ RewriteRule . /index.html [L]
 </VirtualHost>
 EOF
 
+    # Reverse proxy només si és producció
+    if [[ "$ENTORN" == "prod" ]]; then
+        sudo tee -a /etc/apache2/sites-available/frontend.conf >/dev/null <<EOF
+        
+# Definim la variable BACKEND_IP
+Define BACKEND_IP 127.0.0.1
+
+# Reverse Proxy cap al backend
+ProxyPreserveHost On
+ProxyPass /api http://\${BACKEND_IP}/
+ProxyPassReverse /api http://\${BACKEND_IP}/
+EOF
+    fi
     sudo a2ensite frontend.conf
 
 }
@@ -237,7 +261,7 @@ if [[ "$ROL" == "backend" || "$ROL" == "all" ]]; then
 
     install_php
 
-    install_composer
+    install_composer_dev
 
     if [[ "$ENTORN" == "prod" ]]; then
         configure_php_prod
