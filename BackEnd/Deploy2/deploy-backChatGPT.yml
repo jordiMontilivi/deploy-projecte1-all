@@ -68,11 +68,7 @@ jobs:
           scp ./full-setup.sh \
             ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/home/${{ env.TARGET_USER }}/full-setup.sh
 
-          ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} << 'EOF'
-            chmod +x full-setup.sh
-            sudo bash full-setup.sh $TARGET_ENV $TARGET_ROLE
-            rm -f full-setup.sh
-          EOF
+          ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} "chmod +x full-setup.sh && sudo bash full-setup.sh ${{ env.TARGET_ENV }} ${{ env.TARGET_ROLE }} && rm -f full-setup.sh"
 
       # RSYNC DEV
       - name: 7A. Sync files (DEV)

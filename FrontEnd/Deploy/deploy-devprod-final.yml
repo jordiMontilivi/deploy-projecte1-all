@@ -7,6 +7,8 @@ on:
       - main # Quan fem push o merge a la branca de producció
       - develop # Quan fem push o merge a la branca de desenvolupament
 
+  workflow_dispatch:
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -36,13 +38,15 @@ jobs:
 
       # Pas 4: Convertir el codi Vue en web estàndard (Genera la carpeta 'dist')
       - name: Compilar l'aplicació Vue.js
+        env:
+          # Assumint que crees un secret anomenat DEV_BACKEND_IP a GitHub
+          VITE_API_URL: ${{ github.ref == 'refs/heads/main' && '' || format('http://{0}:8000', secrets.DEV_BACKEND_IP) }}
         run: npm run build
 
       # Pas 5: Enviar la carpeta 'dist' al nostre servidor EC2
       - name: Enviar els fitxers compilats al servidor
-        uses: appleboy/scp-action@v0.1.4
+        uses: appleboy/scp-action@v0.1.7
         with:
-          # LA MÀGIA CONDICIONAL:
           # La sintaxi és: ${{ condició && 'valor_si_és_cert' || 'valor_si_és_fals' }}
           # Si estem a la branca 'main', agafa el secret PROD. Si no, agafa el secret DEV.
           host: ${{ env.CURRENT_HOST }}

@@ -31,7 +31,7 @@ jobs:
           php-version: "8.3"
           tools: composer
 
-      # COMPOSER CACHE
+      # --- BLOC DE CACHE DE COMPOSER (PROD ONLY) ---
       - name: 3. Cache Composer dependencies
         if: github.ref == 'refs/heads/main'
         uses: actions/cache@v4
@@ -40,25 +40,29 @@ jobs:
           key: composer-${{ runner.os }}-${{ hashFiles('**/composer.lock') }}
           restore-keys: composer-${{ runner.os }}-
 
-      - name: 3. Construir Vendor (Només PROD)
+      # --- BLOC DE BUILD COMPOSER (PROD ONLY) ---
+      - name: 4. Construir Vendor (Només PROD)
         if: github.ref == 'refs/heads/main'
         run: APP_ENV=prod composer install --no-dev --optimize-autoloader --no-progress --no-interaction
 
-      # --- BLOC DE PREPARACIÓ DEL SERVIDOR (COMPARTIT) ---
-      - name: 4. Configurar SSH i Known Hosts manualment
+      # --- BLOC DE PREPARACIÓ DEL SERVIDOR (COMPARTIT) - SSH CONFIG ---
+      - name: 5. Configurar SSH i Known Hosts manualment
         run: |
           mkdir -p ~/.ssh/
           echo "${{ env.TARGET_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
+
           ssh-keyscan -H ${{ env.TARGET_HOST }} >> ~/.ssh/known_hosts
 
-      - name: 5. Provisionar servidor base (Idempotent)
+      # --- BLOC DE PROVISIONING DEL SERVIDOR (COMPARTIT) ---
+      # Pugem script i mirem si el servidor ja està provisionat. Si no ho està, executem l'script que instal·la Apache, PHP i altres eines bàsiques.
+      - name: 6. Provisionar servidor base (Idempotent)
         run: |
           scp ./full-setup.sh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/home/${{ env.TARGET_USER }}/full-setup.sh
-          ssh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} "chmod +x full-setup.sh && sudo bash full-setup.sh ${{ env.TARGET_ENV }} ${{ env.TARGET_ROLE }}; rm -f full-setup.sh"
+          sh ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }} "chmod +x full-setup.sh && sudo bash full-setup.sh ${{ env.TARGET_ENV }} ${{ env.TARGET_ROLE }} && rm -f full-setup.sh"
 
       # --- BLOC DE SINCRONITZACIÓ (BIFURCAT) ---
-      - name: 6A. Sincronitzar fitxers RSYNC (DEV)
+      - name: 7A. Sincronitzar fitxers RSYNC (DEV)
         if: github.ref == 'refs/heads/develop'
         run: |
           rsync -avz --delete-delay \
@@ -67,55 +71,65 @@ jobs:
             --exclude '.env.local' --exclude 'full-setup.sh' \
             ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
 
-      - name: 6B. Sincronitzar fitxers RSYNC (PROD)
+      - name: 7B. Sincronitzar fitxers RSYNC (PROD)
         if: github.ref == 'refs/heads/main'
         run: |
           rsync -avz --delete-delay \
             --exclude '.git/' --exclude '.github/' \
             --exclude 'var/' --exclude 'tests/' \
             --exclude 'full-setup.sh' \
-            --exclude 'config/secrets/prod/prod.decrypt.private.php' \
+            --exclude 'config/secrets/prod/prod.decrypt.private.php' \ # <-- Excloem la clau privada de Symfony perquè RSYNC no l'esborre
             ./ ${{ env.TARGET_USER }}@${{ env.TARGET_HOST }}:/var/www/backend/
             # Hem afegit l'exclusió de la clau privada de Symfony perquè RSYNC no l'esborri!
 
       # --- BLOC DE POST-DESPLEGAMENT SYMFONY (BIFURCAT) ---
-      - name: 7. Executar tasques Symfony post-desplegament
+      - name: 8. Executar tasques Symfony post-desplegament
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.TARGET_HOST }}
           username: ${{ env.TARGET_USER }}
           key: ${{ env.TARGET_KEY }}
           script: |
-            echo " Iniciant post-desplegament de Symfony per a l'entorn: ${{ env.TARGET_ENV }}"
+
+            echo " Deploy Symfony (${{ env.TARGET_ENV }})"
+
             cd /var/www/backend
 
-            if [ "${{ env.TARGET_ENV }}" == "dev" ]; then
-                echo " Aplicant configuracions exclusives de DEV..."
-                export COMPOSER_ALLOW_SUPERUSER=1
-                APP_ENV=dev composer install --optimize-autoloader
-                
-                APP_ENV=dev php bin/console cache:clear
-                # Hem tret el || true. Si falla la BD, volem saber-ho!
-                APP_ENV=dev php bin/console doctrine:migrations:migrate --allow-no-migration --no-interaction
-            else
-                echo " Aplicant configuracions exclusives de PROD..."
-                
-                echo "1. Netejant la cau perquè Doctrine detecti les noves entitats..."
-                APP_ENV=prod php bin/console cache:clear --no-warmup
+            if [ "${{ env.TARGET_ENV }}" = "dev" ]; then
 
-                echo "2. Executant migracions de Producció..."
-                # Hem tret el || true. El pipeline fallarà si l'SQL té errors.
-                APP_ENV=prod php bin/console doctrine:migrations:migrate --allow-no-migration --no-interaction
-                
-                echo "3. Generant la cau optimitzada per a Producció..."
+                echo " DEV setup"
+
+                export COMPOSER_ALLOW_SUPERUSER=1
+                composer install --optimize-autoloader
+
+                php bin/console cache:clear --env=dev
+
+                php bin/console doctrine:migrations:migrate \
+                    --allow-no-migration \
+                    --no-interaction
+
+            else
+
+                echo " PROD optimization"
+
+                APP_ENV=prod php bin/console cache:clear --no-debug
                 APP_ENV=prod php bin/console cache:warmup
-                
-                # Optimització opcional d'Opcache
+
+                APP_ENV=prod php bin/console doctrine:migrations:migrate \
+                    --allow-no-migration \
+                    --no-interaction
+
+                # Opcional si tens bundle opcache
                 APP_ENV=prod php bin/console opcache:clear || true
+
             fi
 
-            echo " Re-aplicant permisos a la carpeta var/..."
+            echo " Fixing permissions"
+
             sudo setfacl -R -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
             sudo setfacl -dR -m u:www-data:rwX -m u:${{ env.TARGET_USER }}:rwX var/
 
-            echo " Desplegament finalitzat amb èxit!"
+            echo " Reload Apache"
+            sudo systemctl reload apache2
+
+            echo " Deploy completat"
